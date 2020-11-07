@@ -122,52 +122,57 @@ def dilate_holes(base_raster_path, target_raster_path):
 
 def main():
     """Entry point."""
-    try:
-        os.makedirs(WORKSPACE_DIR)
-    except OSError:
-        pass
-    #DEM_PATH = 'sample_data/pit_filled_dem.tif'
-    DEM_PATH = 'sample_data/Inspring Data/Inputs/DEM/MERIT DEM Pro Agua Purus Acre clip2.tif'
+    # try:
+    #     os.makedirs(WORKSPACE_DIR)
+    # except OSError:
+    #     pass
+    DEM_PATH = 'sample_data/pit_filled_dem.tif'
+    #DEM_PATH = 'sample_data/Inspring Data/Inputs/DEM/MERIT DEM Pro Agua Purus Acre clip2.tif'
 
-    dem_info = pygeoprocessing.get_raster_info(DEM_PATH)
-    dem_type = dem_info['numpy_type']
-    scrubbed_dem_path = os.path.join(WORKSPACE_DIR, 'scrubbed_dem.tif')
-    nodata = dem_info['nodata'][0]
-    new_nodata = float(numpy.finfo(dem_type).min)
+    # dem_info = pygeoprocessing.get_raster_info(DEM_PATH)
+    # dem_type = dem_info['numpy_type']
+    # scrubbed_dem_path = os.path.join(WORKSPACE_DIR, 'scrubbed_dem.tif')
+    # nodata = dem_info['nodata'][0]
+    # new_nodata = float(numpy.finfo(dem_type).min)
 
-    LOGGER.info(f'scrub invalid values to {nodata}')
+    # LOGGER.info(f'scrub invalid values to {nodata}')
 
-    # percentile_list = pygeoprocessing.raster_band_percentile(
-    #     (DEM_PATH, 1), WORKSPACE_DIR, [1, 99])
+    # # percentile_list = pygeoprocessing.raster_band_percentile(
+    # #     (DEM_PATH, 1), WORKSPACE_DIR, [1, 99])
 
-    #LOGGER.info(f'percentile_list: {percentile_list}')
+    # #LOGGER.info(f'percentile_list: {percentile_list}')
 
-    pygeoprocessing.raster_calculator(
-        [(DEM_PATH, 1), (nodata, 'raw'), (new_nodata, 'raw')],
-        scrub_invalid_values, scrubbed_dem_path,
-        dem_info['datatype'], new_nodata)
+    # pygeoprocessing.raster_calculator(
+    #     [(DEM_PATH, 1), (nodata, 'raw'), (new_nodata, 'raw')],
+    #     scrub_invalid_values, scrubbed_dem_path,
+    #     dem_info['datatype'], new_nodata)
 
-    LOGGER.info('dialate dem')
-    dilated_dem_path = os.path.join(WORKSPACE_DIR, 'dialated_dem.tif')
-    dilate_holes(scrubbed_dem_path, dilated_dem_path)
+    # LOGGER.info('dialate dem')
+    # dilated_dem_path = os.path.join(WORKSPACE_DIR, 'dialated_dem.tif')
+    # dilate_holes(scrubbed_dem_path, dilated_dem_path)
 
-    LOGGER.info('fill pits')
-    filled_pits_path = os.path.join(WORKSPACE_DIR, 'filled_pits_dem.tif')
-    pygeoprocessing.routing.fill_pits(
-        (dilated_dem_path, 1), filled_pits_path)
+    # LOGGER.info('fill pits')
+    # filled_pits_path = os.path.join(WORKSPACE_DIR, 'filled_pits_dem.tif')
+    # pygeoprocessing.routing.fill_pits(
+    #     (dilated_dem_path, 1), filled_pits_path)
 
+    # slope_path = os.path.join(WORKSPACE_DIR, 'slope.tif')
+    # pygeoprocessing.calculate_slope((DEM_PATH, 1), slope_path)
+
+    # LOGGER.info('flow dir d8')
     flow_dir_d8_path = os.path.join(WORKSPACE_DIR, 'flow_dir_d8.tif')
+    # pygeoprocessing.routing.flow_dir_d8(
+    #     (filled_pits_path, 1), flow_dir_d8_path, working_dir=WORKSPACE_DIR)
 
-    LOGGER.info('flow dir d8')
-    pygeoprocessing.routing.flow_dir_d8(
-        (filled_pits_path, 1), flow_dir_d8_path, working_dir=WORKSPACE_DIR)
-
-    LOGGER.info('flow accum d8')
+    # LOGGER.info('flow accum d8')
     flow_accum_d8_path = os.path.join(WORKSPACE_DIR, 'flow_accum_d8.tif')
-    pygeoprocessing.routing.flow_accumulation_d8(
-        (flow_dir_d8_path, 1), flow_accum_d8_path)
+    # pygeoprocessing.routing.flow_accumulation_d8(
+    #     (flow_dir_d8_path, 1), flow_accum_d8_path)
 
-
+    stream_vector_path = os.path.join(WORKSPACE_DIR, 'stream_segments.gpkg')
+    pygeoprocessing.routing.extract_strahler_streams_d8(
+        (flow_dir_d8_path, 1), (flow_accum_d8_path, 1), 10,
+        stream_vector_path)
 
 
 if __name__ == '__main__':
