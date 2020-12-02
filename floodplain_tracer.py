@@ -1,19 +1,26 @@
 """Tracer script to develop floodplain extraction."""
+import collections
 import logging
 import os
 import shutil
+import sys
+import multiprocessing
+import threading
 
 from osgeo import gdal
 import pygeoprocessing
 import pygeoprocessing.routing
 import numpy
+import matplotlib.pyplot
 import scipy.signal
+import taskgraph
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format=(
         '%(asctime)s (%(relativeCreated)d) %(processName)s %(levelname)s '
-        '%(name)s [%(funcName)s:%(lineno)d] %(message)s'))
+        '%(name)s [%(funcName)s:%(lineno)d] %(message)s'),
+    stream=sys.stdout)
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
@@ -119,60 +126,134 @@ def dilate_holes(base_raster_path, target_raster_path):
     target_raster = None
 
 
-
 def main():
     """Entry point."""
     # try:
     #     os.makedirs(WORKSPACE_DIR)
     # except OSError:
     #     pass
-    DEM_PATH = 'sample_data/pit_filled_dem.tif'
-    #DEM_PATH = 'sample_data/Inspring Data/Inputs/DEM/MERIT DEM Pro Agua Purus Acre clip2.tif'
+    #DEM_PATH = 'sample_data/pit_filled_dem.tif'
+    DEM_PATH = 'sample_data/Inspring Data/Inputs/DEM/MERIT DEM Pro Agua Purus Acre clip2.tif'
 
-    # dem_info = pygeoprocessing.get_raster_info(DEM_PATH)
-    # dem_type = dem_info['numpy_type']
-    # scrubbed_dem_path = os.path.join(WORKSPACE_DIR, 'scrubbed_dem.tif')
-    # nodata = dem_info['nodata'][0]
-    # new_nodata = float(numpy.finfo(dem_type).min)
+    dem_info = pygeoprocessing.get_raster_info(DEM_PATH)
+    dem_type = dem_info['numpy_type']
+    scrubbed_dem_path = os.path.join(WORKSPACE_DIR, 'scrubbed_dem.tif')
+    nodata = dem_info['nodata'][0]
+    new_nodata = float(numpy.finfo(dem_type).min)
 
-    # LOGGER.info(f'scrub invalid values to {nodata}')
+    LOGGER.info(f'scrub invalid values to {nodata}')
 
-    # # percentile_list = pygeoprocessing.raster_band_percentile(
+    # percentile_list = pygeoprocessing.raster_band_percentile(
     # #     (DEM_PATH, 1), WORKSPACE_DIR, [1, 99])
 
     # #LOGGER.info(f'percentile_list: {percentile_list}')
-
-    # pygeoprocessing.raster_calculator(
-    #     [(DEM_PATH, 1), (nodata, 'raw'), (new_nodata, 'raw')],
-    #     scrub_invalid_values, scrubbed_dem_path,
-    #     dem_info['datatype'], new_nodata)
+    task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, -1)
+    scrub_dem_task = task_graph.add_task(
+        func=pygeoprocessing.raster_calculator,
+        args=(
+            [(DEM_PATH, 1), (nodata, 'raw'), (new_nodata, 'raw')],
+            scrub_invalid_values, scrubbed_dem_path,
+            dem_info['datatype'], new_nodata),
+        target_path_list=[scrubbed_dem_path],
+        task_name='scrub dem')
 
     # LOGGER.info('dialate dem')
     # dilated_dem_path = os.path.join(WORKSPACE_DIR, 'dialated_dem.tif')
     # dilate_holes(scrubbed_dem_path, dilated_dem_path)
 
-    # LOGGER.info('fill pits')
-    # filled_pits_path = os.path.join(WORKSPACE_DIR, 'filled_pits_dem.tif')
-    # pygeoprocessing.routing.fill_pits(
-    #     (dilated_dem_path, 1), filled_pits_path)
+    LOGGER.info('fill pits')
+    filled_pits_path = os.path.join(WORKSPACE_DIR, 'filled_pits_dem.tif')
+    fill_pits_task = task_graph.add_task(
+        func=pygeoprocessing.routing.fill_pits,
+        args=((scrubbed_dem_path, 1), filled_pits_path),
+        target_path_list=[filled_pits_path],
+        dependent_task_list=[scrub_dem_task],
+        task_name='fill pits')
 
     # slope_path = os.path.join(WORKSPACE_DIR, 'slope.tif')
     # pygeoprocessing.calculate_slope((DEM_PATH, 1), slope_path)
 
-    # LOGGER.info('flow dir d8')
+    LOGGER.info('flow dir d8')
     flow_dir_d8_path = os.path.join(WORKSPACE_DIR, 'flow_dir_d8.tif')
-    # pygeoprocessing.routing.flow_dir_d8(
-    #     (filled_pits_path, 1), flow_dir_d8_path, working_dir=WORKSPACE_DIR)
+    flow_dir_task = task_graph.add_task(
+        func=pygeoprocessing.routing.flow_dir_d8,
+        args=((filled_pits_path, 1), flow_dir_d8_path),
+        kwargs={'working_dir': WORKSPACE_DIR},
+        target_path_list=[flow_dir_d8_path],
+        dependent_task_list=[fill_pits_task],
+        task_name='flow dir d8')
 
-    # LOGGER.info('flow accum d8')
+    LOGGER.info('flow accum d8')
     flow_accum_d8_path = os.path.join(WORKSPACE_DIR, 'flow_accum_d8.tif')
-    # pygeoprocessing.routing.flow_accumulation_d8(
-    #     (flow_dir_d8_path, 1), flow_accum_d8_path)
+    flow_accum_task = task_graph.add_task(
+        func=pygeoprocessing.routing.flow_accumulation_d8,
+        args=((flow_dir_d8_path, 1), flow_accum_d8_path),
+        target_path_list=[flow_accum_d8_path],
+        dependent_task_list=[flow_dir_task],
+        task_name='flow accum d8')
 
-    stream_vector_path = os.path.join(WORKSPACE_DIR, 'stream_segments.gpkg')
-    pygeoprocessing.routing.extract_strahler_streams_d8(
-        (flow_dir_d8_path, 1), (flow_accum_d8_path, 1), 10,
-        stream_vector_path)
+    LOGGER.info('discovery/finish time')
+    discovery_time_raster_path = os.path.join(WORKSPACE_DIR, 'discovery.tif')
+    finish_time_raster_path = os.path.join(WORKSPACE_DIR, 'finish.tif')
+    discovery_finish_time_task = task_graph.add_task(
+        func=pygeoprocessing.routing.build_discovery_finish_rasters,
+        args=(
+            (flow_dir_d8_path, 1), discovery_time_raster_path,
+            finish_time_raster_path),
+        target_path_list=[
+            discovery_time_raster_path, finish_time_raster_path],
+        dependent_task_list=[flow_dir_task],
+        task_name='discovery/finish time task')
+
+    flow_threshold = 100
+    stream_vector_path = os.path.join(
+        WORKSPACE_DIR, f'stream_segments_{flow_threshold}.gpkg')
+    extract_stream_task = task_graph.add_task(
+        func=pygeoprocessing.routing.extract_strahler_streams_d8,
+        args=(
+            (flow_dir_d8_path, 1), (flow_accum_d8_path, 1),
+            (filled_pits_path, 1), stream_vector_path),
+        kwargs={'min_flow_accum_threshold': flow_threshold, 'river_order': 7},
+        target_path_list=[stream_vector_path],
+        dependent_task_list=[flow_accum_task],
+        task_name='stream extraction')
+
+    target_watershed_boundary_vector_path = os.path.join(
+        WORKSPACE_DIR, 'watershed_bondary.gpkg')
+    calculate_watershed_boundary_task = task_graph.add_task(
+        func=pygeoprocessing.routing.calculate_watershed_boundary,
+        args=(
+            discovery_time_raster_path, finish_time_raster_path,
+            (flow_dir_d8_path, 1), stream_vector_path,
+            target_watershed_boundary_vector_path),
+        target_path_list=[target_watershed_boundary_vector_path],
+        dependent_task_list=[extract_stream_task, discovery_finish_time_task],
+        task_name='watershed boundary')
+
+    # river_id = 338
+    # stream_vector = gdal.OpenEx(stream_vector_path, gdal.OF_VECTOR)
+    # stream_layer = stream_vector.GetLayer()
+    # drop_distance_collection = collections.defaultdict(list)
+    # stream_layer.SetAttributeFilter(f'"river_id"={river_id}')
+    # for stream_feature in stream_layer:
+    #     drop_distance_collection[stream_feature.GetField('order')].append(
+    #         stream_feature.GetField('drop_distance'))
+
+    #     fig, ax = matplotlib.pyplot.subplots()
+
+    #     t_stat, p_val = scipy.stats.ttest_ind(
+    #         drop_distance_collection[1],
+    #         drop_distance_collection[2], equal_var=True)
+
+    #     ax.set_title(
+    #         f'Drop Distance vs Order for flow thresh {flow_threshold}\n'
+    #         f't={t_stat:.3f} p={p_val:.3f}')
+    #     ax.set_ylim([0, 150])
+    #     ax.boxplot([
+    #         drop_distance_collection[order]
+    #         for order in sorted(drop_distance_collection)])
+
+    # matplotlib.pyplot.show()
 
 
 if __name__ == '__main__':
