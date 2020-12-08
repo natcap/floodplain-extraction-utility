@@ -215,18 +215,20 @@ def main():
             (filled_pits_path, 1), stream_vector_path),
         kwargs={'min_flow_accum_threshold': flow_threshold, 'river_order': 7},
         target_path_list=[stream_vector_path],
+        hash_target_files=False,
         dependent_task_list=[flow_accum_task],
         task_name='stream extraction')
 
     target_watershed_boundary_vector_path = os.path.join(
-        WORKSPACE_DIR, 'watershed_bondary.gpkg')
+        WORKSPACE_DIR, 'watershed_boundary.gpkg')
     calculate_watershed_boundary_task = task_graph.add_task(
         func=pygeoprocessing.routing.calculate_watershed_boundary,
         args=(
             discovery_time_raster_path, finish_time_raster_path,
             (flow_dir_d8_path, 1), stream_vector_path,
-            target_watershed_boundary_vector_path),
+            target_watershed_boundary_vector_path, -100),
         target_path_list=[target_watershed_boundary_vector_path],
+        transient_run=True,
         dependent_task_list=[extract_stream_task, discovery_finish_time_task],
         task_name='watershed boundary')
 
