@@ -192,19 +192,6 @@ def main():
         dependent_task_list=[flow_dir_task],
         task_name='flow accum d8')
 
-    LOGGER.info('discovery/finish time')
-    discovery_time_raster_path = os.path.join(WORKSPACE_DIR, 'discovery.tif')
-    finish_time_raster_path = os.path.join(WORKSPACE_DIR, 'finish.tif')
-    discovery_finish_time_task = task_graph.add_task(
-        func=pygeoprocessing.routing.build_discovery_finish_rasters,
-        args=(
-            (flow_dir_d8_path, 1), discovery_time_raster_path,
-            finish_time_raster_path),
-        target_path_list=[
-            discovery_time_raster_path, finish_time_raster_path],
-        dependent_task_list=[flow_dir_task],
-        task_name='discovery/finish time task')
-
     flow_threshold = 100
     stream_vector_path = os.path.join(
         WORKSPACE_DIR, f'stream_segments_{flow_threshold}.gpkg')
@@ -224,12 +211,11 @@ def main():
     calculate_watershed_boundary_task = task_graph.add_task(
         func=pygeoprocessing.routing.calculate_watershed_boundary,
         args=(
-            discovery_time_raster_path, finish_time_raster_path,
             (flow_dir_d8_path, 1), stream_vector_path,
             target_watershed_boundary_vector_path, -100),
         target_path_list=[target_watershed_boundary_vector_path],
         transient_run=True,
-        dependent_task_list=[extract_stream_task, discovery_finish_time_task],
+        dependent_task_list=[extract_stream_task],
         task_name='watershed boundary')
 
     # river_id = 338
